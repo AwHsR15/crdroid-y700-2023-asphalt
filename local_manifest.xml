@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lenovo Legion Y700 2023 (TB320FC / asphalt)
+  crDroid 16.0 用设备树清单
+
+  crDroid 16.0 的基线是 lineage-23.2 + android-16.0.0_r4,
+  和 lolipuru 的设备树分支完全一致,设备树无需任何改动。
+  crDroid 的 breakfast 也仍用 lineage_ 前缀(lunch lineage_asphalt-...),
+  所以 lineage_asphalt.mk 可以直接使用。
+-->
+<manifest>
+  <remote name="lolipuru"
+          fetch="https://github.com/lolipuru"
+          revision="lineage-23.2" />
+
+  <!-- 设备树 -->
+  <project path="device/lenovo/asphalt"
+           name="android_device_lenovo_asphalt"
+           remote="lolipuru" />
+  <project path="device/lenovo/sm8475-common"
+           name="android_devlce_lenovo_sm8475-common"
+           remote="lolipuru" />
+
+  <!-- 内核(ROM 编译时一并编译) -->
+  <project path="kernel/lenovo/sm8475"
+           name="kernel_lenovo_sm8475"
+           remote="lolipuru" />
+  <project path="kernel/lenovo/sm8475-devicetrees"
+           name="kernel_lenovo_sm8475-devicetrees"
+           remote="lolipuru" />
+  <project path="kernel/lenovo/sm8475-modules"
+           name="kernel_lenovo_sm8475-modules"
+           remote="lolipuru" />
+
+  <!--
+    test/cts-root 里 CtsBionicRootTestCases 的 32/64 位变体会安装到同一路径,
+    导致 kati 在许可证/SBOM 检查阶段中止编译。这是 AOSP 源码树的通用问题,
+    与本设备无关;CTS 测试对刷机包毫无用处,直接从树里摘掉。
+  -->
+  <remove-project name="platform/test/cts-root" />
+</manifest>

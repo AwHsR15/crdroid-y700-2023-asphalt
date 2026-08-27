@@ -1,0 +1,125 @@
+﻿========================================================================
+  crDroid 16.0 (v12.11)  一键刷机工具
+  联想拯救者 Y700 2023  (TB320FC / asphalt)
+========================================================================
+
+【怎么用】
+
+  1. 把从 Release 页面下载的文件放进 images 文件夹:
+
+       images/
+         ├── crDroidAndroid-16.0-*-asphalt-v12.11.zip  ← 刷机包(1.23GB)
+         ├── recovery.img                              ← 必需
+         ├── boot.img                                  ← 可选(去 root 用)
+         ├── boot_magisk.img                           ← 可选(装 root 用)
+         └── SHA256SUMS.txt                            ← 建议放,用来校验完整性
+
+     这次刷机包只有 1.23GB,没超过 GitHub 单文件 2GB 上限,
+     不需要像 AviumUI 那样先合并 .00.part / .01.part 分卷,下下来直接用。
+
+  2. 平板打开【开发者选项 → USB 调试】
+
+  3. 用数据线连接电脑
+     ⚠ 必须插平板【长边】那个 USB 口,短边的口不能刷机
+
+  4. 双击运行  一键刷机.bat
+
+  5. 按屏幕提示操作
+
+
+【菜单里各项是什么】
+
+  1  完整刷入 crDroid
+       刷 Recovery → 清空数据 → sideload 刷入系统。
+       ⚠ 会清空平板上所有数据,做之前请务必备份。
+
+  2  只刷 boot.img(干净版)
+       用来去掉 root、恢复成原始内核。不影响系统和数据。
+
+  3  只刷 boot_magisk.img
+       用来获取 root(已经预先打好 Magisk v30.7 补丁)。不影响系统和数据。
+
+  4  重置 super 分区
+       专门修复刷机时报 status 7 / kInstallDeviceOpenError 的情况。
+       ⚠ 执行后设备无法开机,必须接着走一次完整刷机。
+
+  5  只做环境和设备检查
+       不写入任何东西,纯查看状态。不确定情况时可以先跑这个看看。
+
+
+【脚本会自动帮你做的检查】
+
+  · adb / fastboot 是否可用
+      没有的话会自动从 Google 官方下载(不到 10MB),不需要你另外装 SDK。
+      如果你电脑本来就装了、或者已经加进 PATH,会直接用现成的。
+      国内网络访问 dl.google.com 可能需要代理;实在下不动可以手动去
+      https://developer.android.com/tools/releases/platform-tools
+      下载后,把 adb.exe / fastboot.exe 和几个 dll 解压进 bin 文件夹。
+
+  · 机型是否匹配
+      不是 asphalt(TB320FC)会直接拒绝往下走。
+      这条实测有效 —— 曾经成功拦下过一台误插的三星手机。
+
+  · 文件 SHA256 校验(防止下载损坏导致刷到一半失败)
+
+
+【关于 Google 服务 —— 重要】
+
+  ⚠ 这个包是纯净版,不含 Google 服务,刷完是没有 Play 商店的。
+
+  要用 Google 服务的话,需要另外下载 MindTheGapps,并且在刷完系统之后、
+  重启之前,在同一个 Recovery 里再 sideload 一次:
+
+      MindTheGapps-16.0.0-arm64-20260409_073023.zip   (487.6 MB)
+      https://github.com/MindTheGapps/16.0.0-arm64/releases
+
+  顺序非常重要,必须是:
+
+      刷 ROM  →  刷 GApps  →  清数据  →  重启
+
+  GApps 必须在系统首次开机之前刷。如果你已经开过机了,那刷完 GApps
+  还要再清一次数据,否则 Google 服务注册不上,会一直弹
+  「Google Play 服务已停止」。
+
+
+【关于 root】
+
+  菜单第 3 项刷的 boot_magisk.img,就是这个 ROM 自己的 boot.img
+  预先打好 Magisk v30.7 补丁的版本。
+
+  刷完开机后,还要装一个 Magisk 官方 APK 来管理权限:
+      https://github.com/topjohnwu/Magisk/releases
+
+  验证 root 是否可用:
+      adb shell /debug_ramdisk/su -c id
+      期望输出:uid=0(root) gid=0(root) ... context=u:r:magisk:s0
+
+  注意 su 默认不在 PATH 里,直接敲 adb shell su 会报
+  「inaccessible or not found」,这不代表 root 没成功,
+  用上面的全路径测试才准。
+
+
+【刷完之后】
+
+  首次开机要 5~10 分钟,期间可能一直停在开机动画,
+  这是正常的,别以为卡住了就去拔线或强制重启。
+
+  新系统的 USB 调试默认是关的,所以开机后 adb 连不上很正常,
+  需要重新进【开发者选项】打开。
+
+
+【出问题了怎么办】
+
+  · 脚本会在自己所在的文件夹生成 flash_log_日期时间.txt 日志,
+    反馈问题时带上它。
+
+  · 只要 Recovery 还能进,基本都救得回来:重新走一次「完整刷入」即可。
+
+  · 实在进不去系统,设备也没硬砖 —— fastboot 和 9008 模式都还在。
+
+
+【免责声明】
+
+  刷机有风险,操作前请务必备份重要数据。
+  这是非官方的社区构建,与 crDroid、LineageOS 项目、联想公司均无关联。
+  设备变砖、数据丢失等一切后果自负。

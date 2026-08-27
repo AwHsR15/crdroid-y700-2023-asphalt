@@ -1,0 +1,11 @@
+把从 Releases 下载的这些文件放到这个文件夹(或者上一层的 flasher 文件夹)里:
+
+  crDroidAndroid-16.0-20260825-asphalt-v12.11.zip
+  recovery.img
+  boot.img              (可选,想去掉 root 时用)
+  boot_magisk.img       (可选,想要 root 时用)
+
+然后回到上一层,右键「一键刷机.bat」→ 以管理员身份运行。
+
+刷机包这次只有 1.23GB,没超过 GitHub 的 2GB 单文件上限,
+不需要像 AviumUI 那样先合并 .00.part / .01.part 分卷。
