@@ -62,6 +62,79 @@ function Ask {
 }
 
 # ============================================================================
+#  区域锁(PRC / ROW)风险提示
+#
+#  联想从 2024-04 起给 Y700 2023 加了硬件区域锁:固件会在安全持久分区里找
+#  PRC 区域码,找不到就永久写入。写上 PRC 之后再刷 ROW(全球)系固件,
+#  开机会显示红字 "The current system is not compatible with hardware"。
+#
+#  本包是 ROW 基线(blobs 来自 TB320FC_ROW_..._ZUI_17.0.339,指纹以 _ROW 结尾)。
+#  设备树的 board-info.txt 把 asphalt_prc 也列进了 require board,所以
+#  Recovery 的机型检查【不会】拦住 PRC 机器 —— 必须在这里提醒用户。
+# ============================================================================
+function Check-RegionRisk {
+    Title '区域检查(PRC / ROW)'
+
+    $probe = ''
+    $st = Get-AdbState
+    if ($st.State -eq 'device') {
+        foreach ($k in @('ro.vendor.build.fingerprint',
+                         'ro.bootimage.build.fingerprint',
+                         'ro.build.fingerprint',
+                         'ro.build.display.id')) {
+            $probe += ((Adb shell getprop $k) -join '') + '|'
+        }
+    }
+
+    $region = 'unknown'
+    if     ($probe -match 'TB320FC_CN|_CN[_:]')   { $region = 'CN' }
+    elseif ($probe -match 'TB320FC_ROW|_ROW[_:]') { $region = 'ROW' }
+    elseif ($probe -match 'TB320FC_NEC|_NEC[_:]') { $region = 'NEC' }
+
+    W ''
+    W '  这个刷机包是 ROW(全球)基线。' 'White'
+    W '  如果你的平板硬件区域码是 PRC(国行),刷完会开不了机,' 'White'
+    W '  屏幕显示红字 The current system is not compatible with hardware。' 'White'
+    W ''
+
+    switch ($region) {
+        'ROW' {
+            Ok '当前系统的指纹是 ROW,可以直接刷'
+            return $true
+        }
+        'NEC' {
+            Ok '当前系统的指纹是 NEC(日版),与 ROW 同一组,可以刷'
+            return $true
+        }
+        'CN' {
+            W '  ⚠ 检测到当前在跑【国行 CN 固件】' 'Red'
+            W ''
+            W '     2024 年 4 月之后出厂的国行机,区域码多半已被永久写成 PRC。' 'Red'
+            W '     这种机器直接刷本包很可能开不了机。' 'Red'
+            W ''
+            W '     建议先按 XDA 教程把设备从 PRC 转成 ROW,再回来刷:' 'Yellow'
+            W '     https://xdaforums.com/t/y700-2023-gen_2-regional-rom-flashing-guide.4685115/' 'Yellow'
+            W ''
+            return (Ask '我确认自己的机器不是 PRC(或已完成区域转换),继续?' 'N')
+        }
+        default {
+            Warn '没能从系统属性判断出区域'
+            W ''
+            W '     如果这台已经在跑第三方 ROM,属性里的指纹是 ROM 作者写死的,' 'DarkGray'
+            W '     不能代表你的硬件区域。请按下面几条自己判断:' 'DarkGray'
+            W ''
+            W '       2024 年 4 月之前出厂            → 多半没写区域码,刷什么都行' 'White'
+            W '       2024 年 4 月之后买的国行机      → 多半是 PRC,不要直接刷' 'White'
+            W '       以前刷过全球固件且能正常开机    → 已是 ROW,可以刷' 'White'
+            W ''
+            W '     拿不准就按 PRC 处理,先做区域转换再刷。' 'Yellow'
+            W ''
+            return (Ask '我确认自己的机器不是 PRC(或已完成区域转换),继续?' 'N')
+        }
+    }
+}
+
+# ============================================================================
 #  工具定位(优先用 bin\ 里的,其次系统 PATH,都没有就从 Google 官方下载)
 # ============================================================================
 $PLATFORM_TOOLS_URL = 'https://dl.google.com/android/repository/platform-tools-latest-windows.zip'
@@ -657,13 +730,17 @@ while ($true) {
         switch ($c.Trim()) {
             '1' {
                 if (-not $recovery) { Die '缺少 recovery.img,无法完整刷机' @('请从 Release 页面下载 recovery.img') }
-                W ''
-                W '  ⚠ 这个操作会清空平板上的所有数据:' 'Red'
-                W '     · 所有已安装的应用及其数据' 'Red'
-                W '     · 微信/QQ 等的聊天记录' 'Red'
-                W '     · 内部存储里的照片、下载文件等' 'Red'
-                W ''
-                if (Ask '已经备份好数据,确定要开始吗?' 'N') { Do-FullFlash $zip $recovery }
+                if (Check-RegionRisk) {
+                    W ''
+                    W '  ⚠ 这个操作会清空平板上的所有数据:' 'Red'
+                    W '     · 所有已安装的应用及其数据' 'Red'
+                    W '     · 微信/QQ 等的聊天记录' 'Red'
+                    W '     · 内部存储里的照片、下载文件等' 'Red'
+                    W ''
+                    if (Ask '已经备份好数据,确定要开始吗?' 'N') { Do-FullFlash $zip $recovery }
+                } else {
+                    Warn '已取消。确认好区域之后再来。'
+                }
             }
             '2' { if ($bootClean)  { Do-FlashBoot $bootClean  'boot.img (干净版)' } else { Fail '找不到 boot.img' } }
             '3' { if ($bootMagisk) { Do-FlashBoot $bootMagisk 'boot_magisk.img (含 Magisk)' } else { Fail '找不到 boot_magisk.img' } }

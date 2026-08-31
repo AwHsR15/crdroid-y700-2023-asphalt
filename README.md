@@ -63,6 +63,94 @@ sha256sum -c SHA256SUMS.txt
 Get-FileHash crDroidAndroid-16.0-20260825-asphalt-v12.11.zip -Algorithm SHA256
 ```
 
+### ⚠️ 刷之前先确认:你的机器是 PRC 还是 ROW
+
+**这一节比什么都重要。搞错了刷完开不了机,屏幕会显示红字:**
+
+```
+The current system is not compatible with hardware.
+The device will power off automatically.
+```
+
+#### 怎么回事
+
+联想从 **2024 年 4 月**(全球版发布)开始给这台设备加了**硬件区域锁**。
+从 `CN_15.0.761` 这版固件起,系统会去一个**安全持久分区**里找 `PRC` 区域码,
+**找不到就永久写入 `PRC`**。写上之后,再刷 ROW(全球)系固件就会出红字。
+
+反过来也一样:首次成功启动 ROW 固件后设备会被写上 `ROW`,此后就锁定
+ROW / NEC 系了。**这个码是一次性写入、不可逆的。**
+
+#### 这个包是哪个区域的
+
+**ROW。** 有据可查,不是猜的:
+
+```
+# device/lenovo/asphalt/lineage_asphalt.mk
+BUILD_FINGERPRINT := Lenovo/TB320FC/TB320FC:15/AQ3A.240812.002/ZUI_17.0.339_251219_ROW:user/release-keys
+```
+
+blobs 也全部来自 `TB320FC_ROW_OPEN_USER_Q00031.0_V_ZUI_17.0.339_ST_251219`
+这份 **ROW** 固件。发布的 `vendor_boot.img` / `boot.img` / `recovery.img` 里都能
+搜到这串以 `_ROW` 结尾的指纹。
+
+⚠️ **注意设备树的 `board-info.txt` 写的是:**
+
+```
+require board=taro|asphalt|asphalt_prc|asphalt_nec|TB320FC
+```
+
+**它把 `asphalt_prc` 也列进去了,意味着 Recovery 不会拦住 PRC 机器,会照刷不误。**
+刷完能不能开机,取决于你的硬件区域码,而不是这个检查。
+
+#### 你的机器是哪个
+
+刷之前先跑一下 [`scripts/check_region.sh`](scripts/check_region.sh):
+
+```bash
+bash scripts/check_region.sh
+```
+
+没法跑脚本的话,按这个判断:
+
+| 情况 | 结论 |
+|---|---|
+| 2024 年 4 月**之前**出厂 | 多半没写区域码,刷什么都行 |
+| 2024 年 4 月**之后**买的国行机 | 多半是 **PRC**,不能直接刷本包 |
+| 以前刷过 ROW / 全球固件且能正常开机 | 硬件区已是 **ROW**,可以直接刷 |
+| 已经在跑第三方 ROM | 属性里的指纹是 ROM 作者写死的,**不能代表你的硬件区域**,按上面几条判断 |
+
+拿不准的话,**按 PRC 处理最稳妥** —— 先做区域转换再刷,比刷完开不了机再救省事。
+
+#### 如果你是 PRC 机器
+
+**不要直接刷这个包。** 先按 XDA 的教程把设备从 PRC 转成 ROW:
+
+- [Y700 2023 Gen_2 Regional ROM Flashing Guide](https://xdaforums.com/t/y700-2023-gen_2-regional-rom-flashing-guide.4685115/)
+  —— 里面有 `change_prc_row_vendor_boot` 工具和完整步骤
+
+思路是:解锁 Bootloader,刷一份**改过 `vendor_boot.img` 的全球版固件**,
+首次启动成功后设备会被写上 `ROW`,从此就能刷 ROW 系的包(包括本仓库这个)了。
+
+**为什么本仓库不直接提供 PRC 版 vendor_boot**:手上没有 PRC 机器,做不了实机
+验证,发一个没验证过的引导镜像出去风险太大。而且这个包的内核是
+`5.10.260-gki-gf8081af799a3`,`vendor_boot` 里的 55 个内核模块和它是绑定的,
+**不能随便拿别的构建的 vendor_boot 来混用**(版本对不上,模块加载会失败)。
+
+如果你有 PRC 机器愿意帮忙测试,欢迎开 issue,我可以按 PRC 指纹重新编一份
+`vendor_boot`。
+
+#### 万一已经刷了、开不了机
+
+**别慌,设备没砖。** fastboot 和 9008 模式都还在:
+
+```bash
+# 关机后按住 音量下 + 电源 进 fastboot,或者
+adb reboot bootloader     # 如果还能进系统
+```
+
+然后按 XDA 教程刷回国行固件,或者做完区域转换再来。
+
 ### 怎么刷
 
 有两种方式,**推荐用一键脚本**,手动流程留在下面供参考和排查用。
@@ -424,6 +512,102 @@ Magisk), `dtbo.img`, `vendor_boot.img` and `SHA256SUMS.txt` from
 
 The zip is 1.23 GB — under GitHub's 2 GB per-file limit, so unlike the AviumUI
 build **there are no split parts to join**. Verify the checksum before flashing.
+
+### ⚠️ Before you flash: PRC or ROW?
+
+**Read this first. Get it wrong and the tablet won't boot — you'll get red text:**
+
+```
+The current system is not compatible with hardware.
+The device will power off automatically.
+```
+
+#### What's going on
+
+Lenovo added a **hardware region lock** in **April 2024** alongside the Global
+release. From firmware `CN_15.0.761` onward, the system looks for a `PRC` region
+code in a **secure persistent partition** and **permanently writes `PRC` if none
+is found**. Once written, flashing ROW (global) firmware triggers the red text.
+
+It works both ways: the first successful boot of a ROW ROM writes `ROW`, locking
+the device to ROW/NEC from then on. **The code is written once and is
+irreversible.**
+
+#### Which region is this build?
+
+**ROW** — documented, not guessed:
+
+```
+# device/lenovo/asphalt/lineage_asphalt.mk
+BUILD_FINGERPRINT := Lenovo/TB320FC/TB320FC:15/AQ3A.240812.002/ZUI_17.0.339_251219_ROW:user/release-keys
+```
+
+Blobs likewise come from `TB320FC_ROW_OPEN_USER_Q00031.0_V_ZUI_17.0.339_ST_251219`,
+a **ROW** firmware. You can grep that `_ROW` fingerprint out of the released
+`vendor_boot.img` / `boot.img` / `recovery.img` yourself.
+
+⚠️ Note that the device tree's `board-info.txt` says:
+
+```
+require board=taro|asphalt|asphalt_prc|asphalt_nec|TB320FC
+```
+
+**It accepts `asphalt_prc`, so recovery will NOT stop a PRC device from
+installing.** Whether it boots afterwards depends on your hardware region code,
+not on this check.
+
+#### Which one do you have?
+
+Run [`scripts/check_region.sh`](scripts/check_region.sh) before flashing:
+
+```bash
+bash scripts/check_region.sh
+```
+
+If you can't run it:
+
+| Situation | Verdict |
+|---|---|
+| Manufactured **before** April 2024 | Usually no region code — anything flashes |
+| Chinese-market unit bought **after** April 2024 | Likely **PRC** — do not flash this directly |
+| Has previously booted ROW/global firmware fine | Already **ROW** — safe to flash |
+| Already running a custom ROM | The fingerprint is hardcoded by the ROM author and says **nothing** about your hardware region — use the rows above |
+
+When unsure, **assume PRC**. Converting first is far easier than recovering a
+device that won't boot.
+
+#### If you have a PRC device
+
+**Don't flash this package directly.** Convert PRC to ROW first:
+
+- [Y700 2023 Gen_2 Regional ROM Flashing Guide](https://xdaforums.com/t/y700-2023-gen_2-regional-rom-flashing-guide.4685115/)
+  — includes the `change_prc_row_vendor_boot` tool and the full procedure
+
+The idea: unlock the bootloader, flash a global firmware with a **modified
+`vendor_boot.img`**; after the first successful boot the device gets `ROW`
+written, and from then on ROW packages (including this one) work.
+
+**Why this repo doesn't ship a PRC `vendor_boot`:** I don't have PRC hardware to
+test on, and publishing an unverified boot image is too risky. Also this build's
+kernel is `5.10.260-gki-gf8081af799a3` and the 55 kernel modules inside
+`vendor_boot` are tied to it — **don't mix a `vendor_boot` from a different
+build**, the vermagic won't match and modules will fail to load.
+
+If you have a PRC device and are willing to test, open an issue — I can rebuild
+`vendor_boot` with a PRC fingerprint.
+
+#### If you already flashed and it won't boot
+
+**Don't panic, the device isn't bricked.** fastboot and 9008 are both still
+reachable:
+
+```bash
+# Power off, then hold Volume Down + Power for fastboot, or
+adb reboot bootloader     # if you can still get into a system
+```
+
+Then flash back Chinese firmware per the XDA guide, or do the region conversion
+and come back.
 
 ### Flashing
 
