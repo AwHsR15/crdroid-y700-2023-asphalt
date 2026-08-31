@@ -45,6 +45,7 @@
 | `recovery.img` | 刷机第一步要用 |
 | `boot.img` | 干净的 boot(想去掉 root 时刷回来) |
 | `boot_magisk.img` | 已预先打好 Magisk 补丁的 boot(要 root 就刷这个) |
+| `vendor_boot_prc.img` | **国行(PRC 区域锁)机器专用**,见下面 PRC 那节 |
 | `dtbo.img` / `vendor_boot.img` | 一般用不到,救砖时备用 |
 | `SHA256SUMS.txt` | 校验和 |
 
@@ -120,36 +121,119 @@ bash scripts/check_region.sh
 | 以前刷过 ROW / 全球固件且能正常开机 | 硬件区已是 **ROW**,可以直接刷 |
 | 已经在跑第三方 ROM | 属性里的指纹是 ROM 作者写死的,**不能代表你的硬件区域**,按上面几条判断 |
 
-拿不准的话,**按 PRC 处理最稳妥** —— 先做区域转换再刷,比刷完开不了机再救省事。
+拿不准的话,**按 PRC 处理最稳妥** —— 按下面 PRC 那节多刷一个 `vendor_boot_prc.img`,
+比刷完开不了机再救省事。
 
 #### 如果你是 PRC 机器
 
-**不要直接刷这个包。** 先按 XDA 的教程把设备从 PRC 转成 ROW:
+**先说清楚一个常见误解:区域码是写死在设备里的,拿不掉。**
+社区的做法不是"把设备转回 ROW"(做不到),而是**反过来把 ROM 改成 PRC,
+去迎合设备**。XDA 上那个 `change_prc_row_vendor_boot` 工具做的就是这件事。
 
-- [Y700 2023 Gen_2 Regional ROM Flashing Guide](https://xdaforums.com/t/y700-2023-gen_2-regional-rom-flashing-guide.4685115/)
-  —— 里面有 `change_prc_row_vendor_boot` 工具和完整步骤
-
-思路是:解锁 Bootloader,刷一份**改过 `vendor_boot.img` 的全球版固件**,
-首次启动成功后设备会被写上 `ROW`,从此就能刷 ROW 系的包(包括本仓库这个)了。
-
-**为什么本仓库不直接提供 PRC 版 vendor_boot**:手上没有 PRC 机器,做不了实机
-验证,发一个没验证过的引导镜像出去风险太大。而且这个包的内核是
-`5.10.260-gki-gf8081af799a3`,`vendor_boot` 里的 55 个内核模块和它是绑定的,
-**不能随便拿别的构建的 vendor_boot 来混用**(版本对不上,模块加载会失败)。
-
-如果你有 PRC 机器愿意帮忙测试,欢迎开 issue,我可以按 PRC 指纹重新编一份
-`vendor_boot`。
-
-#### 万一已经刷了、开不了机
-
-**别慌,设备没砖。** fastboot 和 9008 模式都还在:
+所以本仓库直接提供了改好的 **`vendor_boot_prc.img`**,PRC 机器这样刷:
 
 ```bash
-# 关机后按住 音量下 + 电源 进 fastboot,或者
-adb reboot bootloader     # 如果还能进系统
+# 1. 正常走完整流程:刷 recovery → 清数据 → sideload 刷 ROM
+#    (和 ROW 机器完全一样,见下面「怎么刷」)
+
+# 2. 刷完先别开机,回到 bootloader,把 vendor_boot 换成 PRC 版
+adb reboot bootloader
+fastboot getvar current-slot                       # 看当前槽位,假设是 b
+fastboot flash vendor_boot_b vendor_boot_prc.img
+fastboot reboot
 ```
 
-然后按 XDA 教程刷回国行固件,或者做完区域转换再来。
+##### 这个文件是怎么来的
+
+区域标记藏在 `vendor_boot` 内嵌的**设备树**里,是一个值为 `ROW` 的 FDT 属性,
+本设备的 `vendor_boot` 里有 **4 处**(对应 4 个 DTB)。二进制布局:
+
+```
+00 00 00 03   FDT_PROP token
+00 00 00 04   len = 4
+00 00 00 49   nameoff
+52 4F 57 00   值 = "ROW\0"
+```
+
+`PRC` 和 `ROW` 都是 3 字符,**替换后长度不变、FDT 结构和后续偏移全部不动**,
+所以这是一次干净的等长替换 —— 实测前后**只有 12 个字节不同**(4 处 × 3 字符),
+文件大小完全一致,反向转换能精确还原出原文件。
+
+转换脚本也在仓库里,可以自己核对、自己生成:
+
+```bash
+python3 scripts/make_prc_vendor_boot.py --check vendor_boot.img       # 只检测
+python3 scripts/make_prc_vendor_boot.py vendor_boot.img out_prc.img   # ROW -> PRC
+python3 scripts/make_prc_vendor_boot.py --to-row out_prc.img back.img # 反向
+```
+
+脚本**只替换通过 FDT 结构校验的位置**(token 是 `FDT_PROP` 且 len 为 4),
+不做无脑字符串替换 —— 镜像里存在 `RPRCSD` 这类巧合子串,盲替会损坏文件。
+
+##### ⚠️ 未在真实 PRC 机器上验证过
+
+**我手上只有一台早期批次的机器(没有区域码),没法实测 PRC 场景。**
+上面这份 `vendor_boot_prc.img` 是按社区工具([LTBox](https://github.com/miner7222/LTBox)
+的 `ltbox-patch/src/region.rs`)公开的同一套规则生成并逐字节核对过的,
+但**没有在真正被锁 PRC 的设备上跑通过**。
+
+另外,改过的 `vendor_boot` 其 AVB 哈希会和 `vbmeta` 对不上。本 ROM 面向已解锁
+Bootloader 的设备(vbmeta 已带 `--disable-verity --disable-verification`),
+通常不影响启动,但这一点同样没有 PRC 实机验证。
+
+**请自备回滚手段再动手**,并欢迎把结果反馈到 issue,我好把这段说明改准。
+
+#### 刷完开不了机 / 一开机就进 Recovery
+
+**别慌,设备没砖。** fastboot 和 9008 都还在。按下面的顺序排查:
+
+##### 症状一:红字 "not compatible with hardware"
+
+区域不匹配。PRC 机器刷了 ROW 的包 —— 按上面那节换 `vendor_boot_prc.img`。
+
+##### 症状二:一开机就进 Recovery,循环出不去
+
+**这说明区域这关已经过了**(否则会是红字),问题在别处。按可能性从高到低:
+
+1. **`/data` 挂不上**(最常见)。上一个系统的加密密钥和新系统对不上,
+   Android 挂不了 data 就会退回 Recovery。
+
+   **解法:在 Recovery 里 `Factory reset` → `Format data / factory reset`。**
+   注意要选 **Format data**,不是只 wipe cache。
+
+2. **`misc` 分区里留着 `boot-recovery` 指令**。这个分区存的是 BCB
+   (bootloader control block),上一次中断的更新可能把"下次进 Recovery"
+   的标记留在里面了,于是每次开机都进 Recovery。
+
+   ```bash
+   fastboot erase misc
+   fastboot reboot
+   ```
+
+   `misc` 只放启动控制块,不含用户数据,擦掉是安全的。
+
+3. **当前槽位被标成 unbootable**。启动失败若干次后 bootloader 会放弃这个槽:
+
+   ```bash
+   fastboot getvar current-slot
+   fastboot getvar slot-unbootable:a
+   fastboot getvar slot-unbootable:b
+   fastboot getvar slot-retry-count:a
+   ```
+
+   如果当前槽被标成 unbootable,切到另一个槽试试:
+
+   ```bash
+   fastboot --set-active=a     # 或 =b
+   fastboot reboot
+   ```
+
+4. **分区来源混搭**。比如 ROM 是这个包的、`vendor_boot` 却来自别的构建。
+   本包内核是 `5.10.260-gki-gf8081af799a3`,`vendor_boot` 里 55 个 `.ko`
+   与之绑定,**跨构建混用会导致模块加载失败**。
+   确保 `boot.img` / `vendor_boot.img` / ROM 三者来自**同一个 Release**。
+
+排查时把 `fastboot getvar all` 的输出留一份,开 issue 时贴上来。
 
 ### 怎么刷
 
@@ -573,41 +657,133 @@ If you can't run it:
 | Has previously booted ROW/global firmware fine | Already **ROW** — safe to flash |
 | Already running a custom ROM | The fingerprint is hardcoded by the ROM author and says **nothing** about your hardware region — use the rows above |
 
-When unsure, **assume PRC**. Converting first is far easier than recovering a
-device that won't boot.
+When unsure, **assume PRC** and additionally flash `vendor_boot_prc.img` per the
+section below — far easier than recovering a device that won't boot.
 
 #### If you have a PRC device
 
-**Don't flash this package directly.** Convert PRC to ROW first:
+**Clearing up a common misconception first: the region code is burned into the
+device and cannot be removed.** The community approach isn't "convert the device
+back to ROW" (impossible) — it's the reverse: **modify the ROM to claim PRC** so
+the locked device accepts it. That's exactly what XDA's
+`change_prc_row_vendor_boot` tool does.
 
-- [Y700 2023 Gen_2 Regional ROM Flashing Guide](https://xdaforums.com/t/y700-2023-gen_2-regional-rom-flashing-guide.4685115/)
-  — includes the `change_prc_row_vendor_boot` tool and the full procedure
-
-The idea: unlock the bootloader, flash a global firmware with a **modified
-`vendor_boot.img`**; after the first successful boot the device gets `ROW`
-written, and from then on ROW packages (including this one) work.
-
-**Why this repo doesn't ship a PRC `vendor_boot`:** I don't have PRC hardware to
-test on, and publishing an unverified boot image is too risky. Also this build's
-kernel is `5.10.260-gki-gf8081af799a3` and the 55 kernel modules inside
-`vendor_boot` are tied to it — **don't mix a `vendor_boot` from a different
-build**, the vermagic won't match and modules will fail to load.
-
-If you have a PRC device and are willing to test, open an issue — I can rebuild
-`vendor_boot` with a PRC fingerprint.
-
-#### If you already flashed and it won't boot
-
-**Don't panic, the device isn't bricked.** fastboot and 9008 are both still
-reachable:
+So this repo ships a pre-converted **`vendor_boot_prc.img`**. PRC users:
 
 ```bash
-# Power off, then hold Volume Down + Power for fastboot, or
-adb reboot bootloader     # if you can still get into a system
+# 1. Do the normal full flow: recovery -> wipe -> sideload the ROM
+#    (identical to ROW devices, see "Flashing" below)
+
+# 2. Before first boot, go back to bootloader and swap in the PRC vendor_boot
+adb reboot bootloader
+fastboot getvar current-slot                       # note the slot, say b
+fastboot flash vendor_boot_b vendor_boot_prc.img
+fastboot reboot
 ```
 
-Then flash back Chinese firmware per the XDA guide, or do the region conversion
-and come back.
+##### How that file is made
+
+The region marker lives in the **device tree** embedded in `vendor_boot`: an FDT
+property whose value is `ROW`. This device's `vendor_boot` has **4 of them**
+(one per DTB). Binary layout:
+
+```
+00 00 00 03   FDT_PROP token
+00 00 00 04   len = 4
+00 00 00 49   nameoff
+52 4F 57 00   value = "ROW\0"
+```
+
+`PRC` and `ROW` are both 3 characters, so the replacement is **length-preserving
+— the FDT structure and every downstream offset stay intact**. Measured: exactly
+**12 bytes differ** (4 sites × 3 chars), file size unchanged, and converting back
+reproduces the original byte-for-byte.
+
+The converter is in the repo so you can audit it or roll your own:
+
+```bash
+python3 scripts/make_prc_vendor_boot.py --check vendor_boot.img       # detect only
+python3 scripts/make_prc_vendor_boot.py vendor_boot.img out_prc.img   # ROW -> PRC
+python3 scripts/make_prc_vendor_boot.py --to-row out_prc.img back.img # reverse
+```
+
+It **only patches sites that pass FDT validation** (token is `FDT_PROP`, len is
+4) rather than doing a blind string replace — the image contains incidental
+substrings like `RPRCSD` that a naive replace would corrupt.
+
+##### ⚠️ Not verified on real PRC hardware
+
+**I only have an early-production unit with no region code, so I cannot test the
+PRC path.** The `vendor_boot_prc.img` above was produced with the same rules the
+community tool uses (see [LTBox](https://github.com/miner7222/LTBox)'s
+`ltbox-patch/src/region.rs`) and verified byte-by-byte, but it has **never been
+booted on an actually PRC-locked device**.
+
+Also, patching `vendor_boot` invalidates its AVB hash against `vbmeta`. This ROM
+targets unlocked bootloaders (its vbmeta is built with `--disable-verity
+--disable-verification`), so it normally doesn't block boot — but that too is
+unverified on PRC hardware.
+
+**Have a rollback plan before you try it**, and please report back in an issue so
+I can make this section accurate.
+
+#### Won't boot / boots straight into Recovery
+
+**Don't panic, the device isn't bricked.** fastboot and 9008 are both reachable.
+Work through these in order:
+
+##### Symptom 1: red text, "not compatible with hardware"
+
+Region mismatch — a PRC device got a ROW package. Swap in
+`vendor_boot_prc.img` per the section above.
+
+##### Symptom 2: boots straight into Recovery, in a loop
+
+**This means the region check already passed** (otherwise you'd get red text) —
+something else is wrong. Most likely first:
+
+1. **`/data` can't be mounted** (most common). The previous system's encryption
+   keys don't match the new system, Android can't mount data, and it falls back
+   to recovery.
+
+   **Fix: in Recovery, `Factory reset` → `Format data / factory reset`.**
+   Make sure it's **Format data**, not just a cache wipe.
+
+2. **The `misc` partition still holds a `boot-recovery` command.** That partition
+   holds the BCB (bootloader control block); an interrupted update can leave a
+   "boot to recovery next time" flag there, so every boot lands in recovery.
+
+   ```bash
+   fastboot erase misc
+   fastboot reboot
+   ```
+
+   `misc` only holds the boot control block — no user data — so erasing it is safe.
+
+3. **The active slot got marked unbootable.** After enough failed boots the
+   bootloader gives up on a slot:
+
+   ```bash
+   fastboot getvar current-slot
+   fastboot getvar slot-unbootable:a
+   fastboot getvar slot-unbootable:b
+   fastboot getvar slot-retry-count:a
+   ```
+
+   If the current slot is unbootable, try the other one:
+
+   ```bash
+   fastboot --set-active=a     # or =b
+   fastboot reboot
+   ```
+
+4. **Mismatched partitions.** e.g. the ROM from this release but a `vendor_boot`
+   from a different build. This build's kernel is `5.10.260-gki-gf8081af799a3`
+   and the 55 `.ko` modules in `vendor_boot` are tied to it — **mixing across
+   builds breaks module loading**. Make sure `boot.img`, `vendor_boot.img` and
+   the ROM all come from **the same Release**.
+
+Capture `fastboot getvar all` while debugging and attach it to your issue.
 
 ### Flashing
 
